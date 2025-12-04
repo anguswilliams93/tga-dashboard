@@ -3,6 +3,7 @@
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tooltip as UITooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   XAxis,
@@ -12,11 +13,12 @@ import {
   ResponsiveContainer,
   Line,
   ComposedChart,
-  Legend,
+  ReferenceDot,
+  ReferenceArea,
 } from "recharts";
 import type { ChartDataPoint } from "@/types";
 import { cn } from "@/lib/utils";
-import { Activity, Layers } from "lucide-react";
+import { Activity, Layers, TrendingUp, TrendingDown, AlertCircle } from "lucide-react";
 import { useState, useMemo } from "react";
 
 interface CombinedLiquidityChartProps {
@@ -44,6 +46,17 @@ const CHART_COLORS = {
   btc: { main: "#8b5cf6", opacity: 0.85 },        // Purple
   stablecoin: { main: "#10b981", opacity: 0.85 }, // Green
 };
+
+// Signal types for buy/sell indicators
+interface TradingSignal {
+  date: string;
+  type: 'buy' | 'sell';
+  normalizedValue: number;
+  description: string;
+  tgaChange: string;
+  btcOutcome: string;
+  confidence: 'high' | 'medium' | 'low';
+}
 
 const chartVariants = {
   hidden: {
@@ -80,13 +93,14 @@ export function CombinedLiquidityChart({
   stablecoinData,
   delay = 0,
 }: CombinedLiquidityChartProps) {
-  const [timeRange, setTimeRange] = useState<TimeRange>("30d");
+  const [timeRange, setTimeRange] = useState<TimeRange>("90d");
   const [activeLines, setActiveLines] = useState({
     tga: true,
     rrp: true,
     btc: true,
     stablecoin: true,
   });
+  const [showSignals, setShowSignals] = useState(true);
 
   // Normalize data to percentage scale (0-100) for comparison
   const normalizeData = (data: ChartDataPoint[], key: string) => {
@@ -169,6 +183,124 @@ export function CombinedLiquidityChart({
       (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
     );
   }, [tgaData, rrpData, btcData, stablecoinData, timeRange]);
+
+  // Detect trading signals based on TGA movements and BTC correlation
+  const tradingSignals = useMemo((): TradingSignal[] => {
+    if (!tgaData || tgaData.length < 7) return [];
+
+    const signals: TradingSignal[] = [];
+    const lookbackPeriod = 5; // 5-day lookback for TGA change
+    const tgaThreshold = 0.02; // 2% TGA change threshold (lowered for more signals)
+
+    // Create date maps for quick lookup - find closest BTC price for any date
+    const btcMap = new Map(btcData.map(d => [d.date, d.value]));
+    const btcDates = btcData.map(d => new Date(d.date).getTime());
+
+    const findClosestBtcPrice = (dateStr: string): number | null => {
+      const targetTime = new Date(dateStr).getTime();
+      // Try exact match first
+      if (btcMap.has(dateStr)) return btcMap.get(dateStr)!;
+      // Find closest date within 3 days
+      let closestDate: string | null = null;
+      let closestDiff = Infinity;
+      for (const [date, value] of btcMap) {
+        const diff = Math.abs(new Date(date).getTime() - targetTime);
+        if (diff < closestDiff && diff < 3 * 24 * 60 * 60 * 1000) {
+          closestDiff = diff;
+          closestDate = date;
+        }
+      }
+      return closestDate ? btcMap.get(closestDate)! : null;
+    };
+
+    // Get normalized TGA values for y-position on chart
+    const tgaValues = tgaData.map(d => d.value);
+    const tgaMin = Math.min(...tgaValues);
+    const tgaMax = Math.max(...tgaValues);
+    const tgaRange = tgaMax - tgaMin || 1;
+
+    // Scan through data to find significant TGA movements
+    for (let i = lookbackPeriod; i < tgaData.length; i++) {
+      const currentDate = tgaData[i].date;
+      const currentTga = tgaData[i].value;
+      const pastTga = tgaData[i - lookbackPeriod].value;
+
+      // Calculate TGA percentage change
+      const tgaChange = (currentTga - pastTga) / pastTga;
+
+      // Look for significant drawdowns (BUY signal) or buildups (SELL signal)
+      if (Math.abs(tgaChange) >= tgaThreshold) {
+        const normalizedTga = ((currentTga - tgaMin) / tgaRange) * 100;
+
+        // Try to get BTC outcome if we have future data
+        let btcOutcome = "Outcome pending...";
+        const forwardIndex = Math.min(i + 14, tgaData.length - 1);
+        if (forwardIndex > i) {
+          const btcAtSignal = findClosestBtcPrice(currentDate);
+          const futureDate = tgaData[forwardIndex].date;
+          const btcFuture = findClosestBtcPrice(futureDate);
+
+          if (btcAtSignal && btcFuture) {
+            const btcChange = ((btcFuture - btcAtSignal) / btcAtSignal) * 100;
+            btcOutcome = btcChange >= 0
+              ? `BTC rose ${btcChange.toFixed(1)}% in the following 14 days`
+              : `BTC fell ${Math.abs(btcChange).toFixed(1)}% in the following 14 days`;
+          }
+        }
+
+        // TGA drawdown = liquidity injection = potential BUY
+        if (tgaChange <= -tgaThreshold) {
+          const confidence = Math.abs(tgaChange) >= 0.05 ? 'high' : Math.abs(tgaChange) >= 0.03 ? 'medium' : 'low';
+          signals.push({
+            date: currentDate,
+            type: 'buy',
+            normalizedValue: normalizedTga,
+            description: `TGA Drawdown: Liquidity injection into markets`,
+            tgaChange: `TGA dropped ${(Math.abs(tgaChange) * 100).toFixed(1)}% over ${lookbackPeriod} days`,
+            btcOutcome,
+            confidence,
+          });
+        }
+        // TGA buildup = liquidity drain = potential SELL
+        else if (tgaChange >= tgaThreshold) {
+          const confidence = Math.abs(tgaChange) >= 0.05 ? 'high' : Math.abs(tgaChange) >= 0.03 ? 'medium' : 'low';
+          signals.push({
+            date: currentDate,
+            type: 'sell',
+            normalizedValue: normalizedTga,
+            description: `TGA Buildup: Liquidity draining from markets`,
+            tgaChange: `TGA rose ${(Math.abs(tgaChange) * 100).toFixed(1)}% over ${lookbackPeriod} days`,
+            btcOutcome,
+            confidence,
+          });
+        }
+      }
+    }
+
+    // Filter signals to avoid clustering (minimum 14 days apart)
+    const filteredSignals: TradingSignal[] = [];
+    let lastSignalDate: Date | null = null;
+
+    for (const signal of signals) {
+      const signalDate = new Date(signal.date);
+      if (!lastSignalDate || (signalDate.getTime() - lastSignalDate.getTime()) >= 14 * 24 * 60 * 60 * 1000) {
+        filteredSignals.push(signal);
+        lastSignalDate = signalDate;
+      }
+    }
+
+    // Only return signals within current time range
+    const now = new Date();
+    const ranges: Record<TimeRange, number> = {
+      "30d": 30,
+      "90d": 90,
+      "180d": 180,
+      "1y": 365,
+    };
+    const cutoff = new Date(now.getTime() - ranges[timeRange] * 24 * 60 * 60 * 1000);
+
+    return filteredSignals.filter(s => new Date(s.date) >= cutoff);
+  }, [tgaData, btcData, timeRange]);
 
   const formatDate = (date: string) => {
     return new Date(date).toLocaleDateString("en-US", {
@@ -370,6 +502,21 @@ export function CombinedLiquidityChart({
                   {label}
                 </Badge>
               ))}
+
+              {/* Trading Signals Toggle */}
+              <Badge
+                variant="secondary"
+                className={cn(
+                  "cursor-pointer transition-all duration-200 px-3 py-1.5 ml-2",
+                  showSignals
+                    ? "opacity-100 bg-amber-500/20 text-amber-600 dark:text-amber-400 border-amber-500"
+                    : "opacity-40 hover:opacity-60"
+                )}
+                onClick={() => setShowSignals(!showSignals)}
+              >
+                <AlertCircle className="w-3.5 h-3.5 mr-2" />
+                Buy/Sell Signals ({tradingSignals.length})
+              </Badge>
             </div>
           </motion.div>
         </CardHeader>
@@ -519,10 +666,108 @@ export function CombinedLiquidityChart({
                       animationEasing="ease-out"
                     />
                   )}
+
+                  {/* Trading Signal Markers */}
+                  {showSignals && tradingSignals.map((signal, index) => (
+                    <ReferenceDot
+                      key={`signal-${index}`}
+                      x={signal.date}
+                      y={signal.normalizedValue}
+                      r={8}
+                      fill={signal.type === 'buy' ? '#22c55e' : '#ef4444'}
+                      stroke="hsl(var(--background))"
+                      strokeWidth={2}
+                    />
+                  ))}
                 </ComposedChart>
               </ResponsiveContainer>
             </motion.div>
           </AnimatePresence>
+
+          {/* Trading Signals Legend */}
+          {showSignals && tradingSignals.length > 0 && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mt-4 p-4 rounded-lg bg-muted/30 border border-border"
+            >
+              <div className="flex items-center gap-2 mb-3">
+                <AlertCircle className="h-4 w-4 text-amber-500" />
+                <span className="text-sm font-semibold">Historical Trading Signals</span>
+                <span className="text-xs text-muted-foreground">(Based on TGA liquidity movements)</span>
+              </div>
+              <div className="grid gap-2 max-h-[200px] overflow-y-auto">
+                <TooltipProvider>
+                  {tradingSignals.map((signal, index) => (
+                    <UITooltip key={index}>
+                      <TooltipTrigger asChild>
+                        <div
+                          className={cn(
+                            "flex items-center justify-between p-2 rounded-md cursor-help transition-colors",
+                            signal.type === 'buy'
+                              ? "bg-emerald-500/10 hover:bg-emerald-500/20"
+                              : "bg-red-500/10 hover:bg-red-500/20"
+                          )}
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className={cn(
+                              "flex items-center justify-center w-6 h-6 rounded-full",
+                              signal.type === 'buy' ? "bg-emerald-500" : "bg-red-500"
+                            )}>
+                              {signal.type === 'buy' ? (
+                                <TrendingUp className="h-3.5 w-3.5 text-white" />
+                              ) : (
+                                <TrendingDown className="h-3.5 w-3.5 text-white" />
+                              )}
+                            </div>
+                            <div>
+                              <p className={cn(
+                                "text-sm font-medium",
+                                signal.type === 'buy' ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"
+                              )}>
+                                {signal.type === 'buy' ? 'BUY Signal' : 'SELL Signal'}
+                              </p>
+                              <p className="text-xs text-muted-foreground">
+                                {new Date(signal.date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                              </p>
+                            </div>
+                          </div>
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              "text-xs",
+                              signal.confidence === 'high' ? "border-amber-500 text-amber-600" :
+                              signal.confidence === 'medium' ? "border-blue-500 text-blue-600" :
+                              "border-gray-500 text-gray-600"
+                            )}
+                          >
+                            {signal.confidence} confidence
+                          </Badge>
+                        </div>
+                      </TooltipTrigger>
+                      <TooltipContent side="left" className="max-w-[300px] p-3">
+                        <div className="space-y-2">
+                          <p className="font-semibold text-sm">{signal.description}</p>
+                          <div className="space-y-1 text-xs">
+                            <p className="text-muted-foreground">
+                              <span className="font-medium text-foreground">What happened: </span>
+                              {signal.tgaChange}
+                            </p>
+                            <p className={cn(
+                              signal.btcOutcome.includes('rose') ? "text-emerald-600" : "text-red-500"
+                            )}>
+                              <span className="font-medium text-foreground">Outcome: </span>
+                              {signal.btcOutcome}
+                            </p>
+                          </div>
+                        </div>
+                      </TooltipContent>
+                    </UITooltip>
+                  ))}
+                </TooltipProvider>
+              </div>
+            </motion.div>
+          )}
         </CardContent>
       </Card>
     </motion.div>

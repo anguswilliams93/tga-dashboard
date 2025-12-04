@@ -389,11 +389,21 @@ export function DashboardClient({
       {/* Footer info */}
       <motion.div
         variants={itemVariants}
-        className="flex items-center justify-center gap-4 text-xs text-muted-foreground pt-4"
+        className="flex flex-col items-center gap-2 text-xs text-muted-foreground pt-4"
       >
-        <span>Data sources: Treasury FiscalData, FRED, CoinMarketCap</span>
-        <span className="w-1 h-1 rounded-full bg-muted-foreground" />
-        <span>Updated every 15 minutes</span>
+        <div className="flex items-center gap-4">
+          <span>Data sources: Treasury FiscalData, FRED, CoinMarketCap</span>
+          <span className="w-1 h-1 rounded-full bg-muted-foreground" />
+          <span>Updated every 15 minutes</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <span>Made with</span>
+          <span className="text-red-500">&lt;3</span>
+          <span>by</span>
+          <span className="font-medium text-foreground">NativeSchema</span>
+          <span>and</span>
+          <span className="font-medium text-foreground">ZEROBI</span>
+        </div>
       </motion.div>
     </motion.div>
   );
