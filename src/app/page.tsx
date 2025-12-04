@@ -1,65 +1,89 @@
-import Image from "next/image";
+import { Suspense } from "react";
+import {
+  getTgaChartData,
+  getRrpChartData,
+  getLatestTga,
+  getLatestRrp,
+  getLatestBtc,
+  getStablecoinMarketCap,
+  getBtcChartData,
+  getStablecoinChartData,
+} from "./actions";
+import { DashboardClient } from "@/components/dashboard/DashboardClient";
+import { DashboardSkeleton } from "@/components/dashboard/Skeletons";
+
+// Force dynamic rendering to fetch fresh data at request time
+export const dynamic = "force-dynamic";
+
+// Revalidate data every hour
+export const revalidate = 3600;
+
+async function DashboardContent() {
+  // Fetch all data in parallel with error handling
+  const results = await Promise.allSettled([
+    getTgaChartData(365),
+    getRrpChartData(365),
+    getLatestTga(),
+    getLatestRrp(),
+    getLatestBtc(),
+    getStablecoinMarketCap(),
+    getBtcChartData(365),
+    getStablecoinChartData(365),
+  ]);
+
+  const tgaData = results[0].status === "fulfilled" ? results[0].value : [];
+  const rrpData = results[1].status === "fulfilled" ? results[1].value : [];
+  const latestTga = results[2].status === "fulfilled" ? results[2].value : null;
+  const latestRrp = results[3].status === "fulfilled" ? results[3].value : null;
+  const btcData = results[4].status === "fulfilled" ? results[4].value : null;
+  const stablecoinData = results[5].status === "fulfilled" ? results[5].value : null;
+  const btcChartData = results[6].status === "fulfilled" ? results[6].value : [];
+  const stablecoinChartData = results[7].status === "fulfilled" ? results[7].value : [];
+
+  return (
+    <DashboardClient
+      tgaData={tgaData}
+      rrpData={rrpData}
+      latestTga={latestTga}
+      latestRrp={latestRrp}
+      btcData={btcData}
+      stablecoinData={stablecoinData}
+      btcChartData={btcChartData}
+      stablecoinChartData={stablecoinChartData}
+    />
+  );
+}
 
 export default function Home() {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
+    <div className="min-h-screen bg-background">
+      <div className="container mx-auto px-4 py-8">
+        {/* Header */}
+        <header className="mb-8">
+          <h1 className="text-4xl font-bold tracking-tight mb-2">
+            TGA Liquidity Dashboard
           </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+          <p className="text-muted-foreground text-lg">
+            Real-time Treasury General Account, Reverse Repo, and Crypto market
+            liquidity tracking
           </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
+        </header>
+
+        {/* Dashboard Content */}
+        <Suspense fallback={<DashboardSkeleton />}>
+          <DashboardContent />
+        </Suspense>
+
+        {/* Footer */}
+        <footer className="mt-12 pt-8 border-t text-center text-sm text-muted-foreground">
+          <p>
+            Data sources: FiscalData Treasury, FRED (St. Louis Fed), CoinGecko
+          </p>
+          <p className="mt-1">
+            Formula: Net Liquidity = Fed Balance Sheet - TGA - RRP
+          </p>
+        </footer>
+      </div>
     </div>
   );
 }
