@@ -3,13 +3,14 @@
 import { MetricCard } from "@/components/dashboard/MetricCard";
 import { LiquidityChart } from "@/components/dashboard/LiquidityChart";
 import { CombinedLiquidityChart } from "@/components/dashboard/CombinedLiquidityChart";
-import { LiquidityHeatmap } from "@/components/dashboard/LiquidityHeatmap";
 import { SuggestionBox } from "@/components/dashboard/SuggestionBox";
+import { CompositeSignalCard } from "@/components/dashboard/CompositeSignalCard";
+import { NewsCard } from "@/components/dashboard/NewsCard";
 import type { ChartDataPoint } from "@/types";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, useInView } from "framer-motion";
 import { DollarSign, TrendingUp, Bitcoin, Coins, RefreshCw, Info, Target, LineChart, ChevronDown, ChevronUp } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { useState } from "react";
+import { useState, useMemo, useRef } from "react";
+import { calculateCompositeSignal } from "@/lib/signals";
 
 interface DashboardClientProps {
   tgaData: ChartDataPoint[];
@@ -20,6 +21,43 @@ interface DashboardClientProps {
   stablecoinData: { total: number; usdt: number; usdc: number; change24h: number } | null;
   btcChartData: ChartDataPoint[];
   stablecoinChartData: ChartDataPoint[];
+}
+
+// Scroll-triggered animation wrapper component
+function ScrollReveal({
+  children,
+  delay = 0,
+  direction = "right"
+}: {
+  children: React.ReactNode;
+  delay?: number;
+  direction?: "right" | "left" | "up" | "down";
+}) {
+  const ref = useRef(null);
+  const isInView = useInView(ref, { once: true, margin: "-100px" });
+
+  const directionVariants = {
+    right: { x: 100, opacity: 0 },
+    left: { x: -100, opacity: 0 },
+    up: { y: 50, opacity: 0 },
+    down: { y: -50, opacity: 0 },
+  };
+
+  return (
+    <motion.div
+      ref={ref}
+      initial={directionVariants[direction]}
+      animate={isInView ? { x: 0, y: 0, opacity: 1 } : directionVariants[direction]}
+      transition={{
+        type: "spring",
+        stiffness: 60,
+        damping: 20,
+        delay: delay,
+      }}
+    >
+      {children}
+    </motion.div>
+  );
 }
 
 // Container animation variants
@@ -77,10 +115,6 @@ export function DashboardClient({
   const tgaBillions = latestTga ? latestTga.balance / 1000 : 0;
   const rrpBillions = latestRrp ? latestRrp.balance : 0;
 
-  // Calculate net liquidity (simplified formula)
-  const fedBalance = 7000;
-  const netLiquidity = fedBalance - tgaBillions - rrpBillions;
-
   // Format TGA/RRP values (input is in millions from API)
   const formatMillionsAsBillions = (valueInMillions: number) => {
     const billions = valueInMillions / 1000;
@@ -100,6 +134,20 @@ export function DashboardClient({
   const tgaProgress = Math.min(100, (tgaBillions / 1000) * 100); // Max 1T
   const rrpProgress = Math.min(100, (rrpBillions / 500) * 100); // Max 500B
   const btcProgress = btcData ? Math.min(100, (btcData.price / 150000) * 100) : 0; // Max 150k
+
+  // Calculate composite multi-factor signal
+  const compositeSignal = useMemo(() => {
+    return calculateCompositeSignal(
+      tgaData,
+      rrpData,
+      btcChartData,
+      stablecoinChartData,
+      latestTga ? { balance: latestTga.balance, change: latestTga.change } : null,
+      latestRrp ? { balance: latestRrp.balance, change: latestRrp.change } : null,
+      btcData,
+      stablecoinData
+    );
+  }, [tgaData, rrpData, btcChartData, stablecoinChartData, latestTga, latestRrp, btcData, stablecoinData]);
 
   return (
     <motion.div
@@ -124,11 +172,13 @@ export function DashboardClient({
             ease: "linear"
           }}
         />
-        <div className="relative flex items-center justify-between">
+        {/* <div className="relative flex items-center justify-between">
           <div>
-            <h2 className="text-2xl font-bold tracking-tight">Market Overview</h2>
-            <p className="text-muted-foreground mt-1">
-              Real-time liquidity metrics and market indicators
+            <h2 className="text-2xl font-bold tracking-tight bg-gradient-to-r from-foreground via-foreground to-foreground/70 bg-clip-text">
+              Liquidity Signal Dashboard
+            </h2>
+            <p className="text-muted-foreground mt-1 max-w-xl">
+              Track Treasury flows, Fed liquidity, and stablecoin supply to identify optimal BTC entry and exit points using our 4-factor composite signal strategy.
             </p>
           </div>
           <motion.div
@@ -139,10 +189,10 @@ export function DashboardClient({
             <RefreshCw className="h-4 w-4" />
             Live data
           </motion.div>
-        </div>
+        </div> */}
 
         {/* Expandable explanation section */}
-        <motion.div className="mt-4 pt-4 border-t border-primary/10">
+        <div className="relative">
           <button
             onClick={() => setShowExplanation(!showExplanation)}
             className="flex items-center gap-2 text-sm font-medium text-primary hover:text-primary/80 transition-colors"
@@ -242,7 +292,7 @@ export function DashboardClient({
               </motion.div>
             )}
           </AnimatePresence>
-        </motion.div>
+        </div>
       </motion.div>
 
       {/* Metric Cards Grid */}
@@ -314,97 +364,109 @@ export function DashboardClient({
         </motion.div>
       </motion.div>
 
+      {/* Composite Signal Card - Multi-Factor Trading Signal */}
+      <ScrollReveal direction="right" delay={0}>
+        <CompositeSignalCard signal={compositeSignal} />
+      </ScrollReveal>
+
       {/* Combined Multi-Line Chart */}
-      <motion.div variants={sectionVariants}>
+      <ScrollReveal direction="right" delay={0.1}>
         <CombinedLiquidityChart
           tgaData={tgaData}
           rrpData={rrpData}
           btcData={btcChartData}
           stablecoinData={stablecoinChartData}
-          delay={0.25}
+          delay={0}
         />
-      </motion.div>
+      </ScrollReveal>
 
       {/* Charts Section - Liquidity */}
-      <motion.div
-        variants={sectionVariants}
-        className="grid grid-cols-1 lg:grid-cols-2 gap-6"
-      >
-        <LiquidityChart
-          title="TGA Balance"
-          description="Treasury General Account balance over time"
-          data={tgaData}
-          color="#f97316"
-          delay={0.3}
-        />
-        <LiquidityChart
-          title="RRP Balance"
-          description="Reverse Repo Program balance over time"
-          data={rrpData}
-          color="#3b82f6"
-          delay={0.35}
-        />
-      </motion.div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <ScrollReveal direction="right" delay={0}>
+          <LiquidityChart
+            title="TGA Balance"
+            description="Treasury General Account balance over time"
+            data={tgaData}
+            color="#f97316"
+            delay={0}
+          />
+        </ScrollReveal>
+        <ScrollReveal direction="right" delay={0.1}>
+          <LiquidityChart
+            title="RRP Balance"
+            description="Reverse Repo Program balance over time"
+            data={rrpData}
+            color="#3b82f6"
+            delay={0}
+          />
+        </ScrollReveal>
+      </div>
 
       {/* Charts Section - Crypto */}
-      <motion.div
-        variants={sectionVariants}
-        className="grid grid-cols-1 lg:grid-cols-2 gap-6"
-      >
-        <LiquidityChart
-          title="Bitcoin Price"
-          description="BTC price in USD over time"
-          data={btcChartData}
-          color="#8b5cf6"
-          valuePrefix="$"
-          valueSuffix=""
-          valueInBillions={false}
-          delay={0.4}
-        />
-        <LiquidityChart
-          title="Stablecoin Market Cap"
-          description="Total stablecoin supply over time"
-          data={stablecoinChartData}
-          color="#10b981"
-          delay={0.45}
-        />
-      </motion.div>
-
-      {/* Liquidity Health Monitor and Suggestion Box */}
-      <motion.div
-        variants={sectionVariants}
-        className="grid grid-cols-1 lg:grid-cols-3 gap-6"
-      >
-        <div className="lg:col-span-2">
-          <LiquidityHeatmap
-            netLiquidity={netLiquidity}
-            tga={tgaBillions}
-            rrp={rrpBillions}
-            delay={0.4}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <ScrollReveal direction="right" delay={0}>
+          <LiquidityChart
+            title="Bitcoin Price"
+            description="BTC price in USD over time"
+            data={btcChartData}
+            color="#8b5cf6"
+            valuePrefix="$"
+            valueSuffix=""
+            valueInBillions={false}
+            delay={0}
           />
-        </div>
-        <SuggestionBox delay={0.45} />
-      </motion.div>
+        </ScrollReveal>
+        <ScrollReveal direction="right" delay={0.1}>
+          <LiquidityChart
+            title="Stablecoin Market Cap"
+            description="Total stablecoin supply over time"
+            data={stablecoinChartData}
+            color="#10b981"
+            delay={0}
+          />
+        </ScrollReveal>
+      </div>
 
-      {/* Footer info */}
-      <motion.div
-        variants={itemVariants}
-        className="flex flex-col items-center gap-2 text-xs text-muted-foreground pt-4"
-      >
-        <div className="flex items-center gap-4">
-          <span>Data sources: Treasury FiscalData, FRED, CoinMarketCap</span>
-          <span className="w-1 h-1 rounded-full bg-muted-foreground" />
-          <span>Updated every 15 minutes</span>
-        </div>
-        <div className="flex items-center gap-1">
-          <span>Made with</span>
-          <span className="text-red-500">&lt;3</span>
-          <span>by</span>
-          <span className="font-medium text-foreground">NativeSchema</span>
-          <span>and</span>
-          <span className="font-medium text-foreground">ZEROBI</span>
-        </div>
-      </motion.div>
+      {/* News Feed */}
+      <ScrollReveal direction="right" delay={0}>
+        <NewsCard delay={0} />
+      </ScrollReveal>
+
+      {/* Suggestion Box */}
+      <ScrollReveal direction="right" delay={0}>
+        <SuggestionBox delay={0} />
+      </ScrollReveal>
+
+      {/* Footer */}
+      <ScrollReveal direction="up" delay={0}>
+        <footer className="flex items-center justify-between gap-3 border-t pt-6 pb-2 max-lg:flex-col">
+          <p className="text-muted-foreground text-sm text-balance max-md:text-center">
+            ©{new Date().getFullYear()}{" "}
+            <span className="text-primary font-medium">TGA Liquidity Dashboard</span>
+            {" · "}Data sources: Treasury FiscalData, FRED, CoinGecko
+          </p>
+          <div className="flex items-center gap-4 text-sm text-muted-foreground">
+            <span>Made with <span className="text-red-500">♥</span> by</span>
+            <a
+              href="https://nativeschema.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-medium text-foreground hover:text-primary transition-colors"
+            >
+              NativeSchema
+            </a>
+            <span className="w-1 h-1 rounded-full bg-muted-foreground" />
+            <a
+              href="https://zerobi.au"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-medium text-foreground hover:text-primary transition-colors"
+            >
+              ZEROBI
+            </a>
+          </div>
+        </footer>
+      </ScrollReveal>
     </motion.div>
   );
 }

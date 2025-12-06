@@ -1,19 +1,24 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { submitSuggestion } from "@/app/actions/submitSuggestion";
+import { getSuggestions, type Suggestion } from "@/app/actions/getSuggestions";
 import {
   Lightbulb,
   Send,
   CheckCircle2,
   Loader2,
   MessageSquarePlus,
-  Sparkles
+  Sparkles,
+  ChevronDown,
+  ChevronUp,
+  List,
+  Clock
 } from "lucide-react";
 
 interface SuggestionBoxProps {
@@ -57,6 +62,26 @@ export function SuggestionBox({ delay = 0 }: SuggestionBoxProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+  const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false);
+
+  // Fetch suggestions when dropdown is opened
+  useEffect(() => {
+    if (showSuggestions && suggestions.length === 0) {
+      setIsLoadingSuggestions(true);
+      getSuggestions()
+        .then((data) => setSuggestions(data))
+        .catch(() => setSuggestions([]))
+        .finally(() => setIsLoadingSuggestions(false));
+    }
+  }, [showSuggestions, suggestions.length]);
+
+  // Refresh suggestions after successful submission
+  const refreshSuggestions = async () => {
+    const data = await getSuggestions();
+    setSuggestions(data);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -84,6 +109,9 @@ export function SuggestionBox({ delay = 0 }: SuggestionBoxProps) {
       setIsSubmitted(true);
       setSuggestion("");
       setEmail("");
+
+      // Refresh suggestions list
+      await refreshSuggestions();
 
       // Reset after 5 seconds
       setTimeout(() => {
@@ -261,6 +289,91 @@ export function SuggestionBox({ delay = 0 }: SuggestionBoxProps) {
               </motion.form>
             )}
           </AnimatePresence>
+
+          {/* View Suggestions Dropdown */}
+          <div className="mt-4 pt-4 border-t border-border/50">
+            <button
+              onClick={() => setShowSuggestions(!showSuggestions)}
+              className="flex items-center justify-between w-full text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <span className="flex items-center gap-2">
+                <List className="h-4 w-4" />
+                View All Suggestions
+                {suggestions.length > 0 && (
+                  <Badge variant="secondary" className="ml-1 text-xs">
+                    {suggestions.length}
+                  </Badge>
+                )}
+              </span>
+              {showSuggestions ? (
+                <ChevronUp className="h-4 w-4" />
+              ) : (
+                <ChevronDown className="h-4 w-4" />
+              )}
+            </button>
+
+            <AnimatePresence>
+              {showSuggestions && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: "auto", opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ type: "spring", stiffness: 100, damping: 15 }}
+                  className="overflow-hidden"
+                >
+                  <div className="mt-3 space-y-2 max-h-64 overflow-y-auto pr-1">
+                    {isLoadingSuggestions ? (
+                      <div className="flex items-center justify-center py-4">
+                        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                      </div>
+                    ) : suggestions.length === 0 ? (
+                      <p className="text-sm text-muted-foreground text-center py-4">
+                        No suggestions yet. Be the first!
+                      </p>
+                    ) : (
+                      suggestions.map((item) => (
+                        <motion.div
+                          key={item.id}
+                          initial={{ opacity: 0, x: -10 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          className={cn(
+                            "p-3 rounded-lg",
+                            "bg-muted/30 border border-border/30",
+                            "hover:bg-muted/50 transition-colors"
+                          )}
+                        >
+                          <p className="text-sm text-foreground line-clamp-2">
+                            {item.suggestion}
+                          </p>
+                          <div className="flex items-center gap-2 mt-2 text-xs text-muted-foreground">
+                            <Clock className="h-3 w-3" />
+                            <span>
+                              {new Date(item.created_at).toLocaleDateString("en-US", {
+                                month: "short",
+                                day: "numeric",
+                                year: "numeric",
+                              })}
+                            </span>
+                            <Badge
+                              variant="outline"
+                              className={cn(
+                                "text-xs ml-auto",
+                                item.status === "pending" && "text-yellow-600 border-yellow-600/30",
+                                item.status === "reviewed" && "text-blue-600 border-blue-600/30",
+                                item.status === "implemented" && "text-emerald-600 border-emerald-600/30"
+                              )}
+                            >
+                              {item.status}
+                            </Badge>
+                          </div>
+                        </motion.div>
+                      ))
+                    )}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
         </CardContent>
       </Card>
     </motion.div>

@@ -235,6 +235,116 @@ server.tool(
   }
 );
 
+// News Article Interface
+interface NewsArticle {
+  title: string;
+  link: string;
+  source: string;
+  pubDate: string;
+}
+
+// Helper function to parse Google News RSS
+function parseGoogleNewsRSS(xml: string): NewsArticle[] {
+  const articles: NewsArticle[] = [];
+  const itemRegex = /<item>([\s\S]*?)<\/item>/g;
+  const titleRegex = /<title><!\[CDATA\[(.*?)\]\]><\/title>|<title>(.*?)<\/title>/;
+  const linkRegex = /<link>(.*?)<\/link>/;
+  const pubDateRegex = /<pubDate>(.*?)<\/pubDate>/;
+  const sourceRegex = /<source.*?>(.*?)<\/source>/;
+
+  let match;
+  while ((match = itemRegex.exec(xml)) !== null) {
+    const item = match[1];
+
+    const titleMatch = item.match(titleRegex);
+    const linkMatch = item.match(linkRegex);
+    const pubDateMatch = item.match(pubDateRegex);
+    const sourceMatch = item.match(sourceRegex);
+
+    if (titleMatch && linkMatch) {
+      articles.push({
+        title: (titleMatch[1] || titleMatch[2] || "").trim(),
+        link: linkMatch[1].trim(),
+        source: sourceMatch ? sourceMatch[1].trim() : "Google News",
+        pubDate: pubDateMatch ? pubDateMatch[1].trim() : new Date().toISOString(),
+      });
+    }
+  }
+
+  return articles;
+}
+
+// News Fetch Tool - Fetch latest news for liquidity-related topics
+server.tool(
+  "news_fetch",
+  "Fetch latest 5 news articles for TGA liquidity, RRP, Bitcoin, and Stablecoin topics",
+  {
+    category: z
+      .enum(["tga", "rrp", "btc", "stablecoin", "all"])
+      .default("all")
+      .describe("News category: tga, rrp, btc, stablecoin, or all"),
+  },
+  async ({ category }) => {
+    try {
+      const searchQueries: Record<string, string> = {
+        tga: "Treasury General Account liquidity OR TGA balance OR Treasury cash balance",
+        rrp: "Reverse repo OR RRP Federal Reserve OR overnight reverse repurchase",
+        btc: "Bitcoin price OR BTC cryptocurrency OR Bitcoin market",
+        stablecoin: "Stablecoin USDT OR USDC OR stablecoin market cap OR Tether",
+      };
+
+      const categoriesToFetch = category === "all"
+        ? ["tga", "rrp", "btc", "stablecoin"]
+        : [category];
+
+      const results: Record<string, NewsArticle[]> = {};
+
+      for (const cat of categoriesToFetch) {
+        const query = encodeURIComponent(searchQueries[cat]);
+        const url = `https://news.google.com/rss/search?q=${query}&hl=en-US&gl=US&ceid=US:en`;
+
+        try {
+          const response = await fetch(url, {
+            headers: {
+              "User-Agent": "Mozilla/5.0 (compatible; LiquidityDashboard/1.0)",
+            },
+          });
+
+          if (!response.ok) {
+            results[cat] = [];
+            continue;
+          }
+
+          const xml = await response.text();
+          const articles = parseGoogleNewsRSS(xml).slice(0, 5);
+          results[cat] = articles;
+        } catch {
+          results[cat] = [];
+        }
+      }
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify(results, null, 2),
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Error fetching news: ${error instanceof Error ? error.message : "Unknown error"}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  }
+);
+
 // Start the server with stdio transport
 async function main() {
   const transport = new StdioServerTransport();

@@ -89,3 +89,31 @@ export interface MetricCard {
   changeLabel?: string;
   trend?: "up" | "down" | "neutral";
 }
+
+// Multi-factor Signal Types
+export type SignalStrength = "strong" | "moderate" | "weak";
+export type SignalAction = "BUY" | "SELL" | "HOLD";
+
+export interface FactorSignal {
+  name: string;
+  score: number; // -1 to +1
+  weight: number;
+  reason: string;
+  condition: string;
+}
+
+export interface CompositeSignal {
+  score: number; // -1 to +1
+  action: SignalAction;
+  strength: SignalStrength;
+  factors: FactorSignal[];
+  timestamp: string;
+}
+
+export interface SignalThresholds {
+  strongBuy: number;   // > 0.6
+  moderateBuy: number; // > 0.3
+  hold: number;        // -0.3 to 0.3
+  moderateSell: number; // < -0.3
+  strongSell: number;  // < -0.6
+}

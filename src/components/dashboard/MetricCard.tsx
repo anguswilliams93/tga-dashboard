@@ -3,9 +3,72 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { motion } from "framer-motion";
+import { motion, useMotionValue, useTransform, animate } from "framer-motion";
 import { TrendingUp, TrendingDown, Minus, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useEffect, useMemo } from "react";
+
+// Animated counting component for numeric values
+function AnimatedValue({ value, delay = 0 }: { value: string; delay?: number }) {
+  // Parse the value to extract prefix, number, and suffix
+  const parsed = useMemo(() => {
+    // Match patterns like "$123.45B", "$123,456", "123.45%", etc.
+    const match = value.match(/^([^0-9]*)([0-9,.]+)(.*)$/);
+    if (!match) return { prefix: "", number: 0, suffix: "", decimals: 0, hasCommas: false };
+
+    const [, prefix, numStr, suffix] = match;
+    const hasCommas = numStr.includes(",");
+    const cleanNum = numStr.replace(/,/g, "");
+    const decimals = cleanNum.includes(".") ? cleanNum.split(".")[1].length : 0;
+
+    return {
+      prefix: prefix || "",
+      number: parseFloat(cleanNum) || 0,
+      suffix: suffix || "",
+      decimals,
+      hasCommas
+    };
+  }, [value]);
+
+  const count = useMotionValue(0);
+  const rounded = useTransform(count, (latest) => {
+    const num = parsed.decimals > 0
+      ? latest.toFixed(parsed.decimals)
+      : Math.round(latest).toString();
+
+    // Add commas if original had them
+    if (parsed.hasCommas) {
+      const parts = num.split(".");
+      parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+      return parts.join(".");
+    }
+    return num;
+  });
+
+  useEffect(() => {
+    // Start from 0 and animate to target
+    count.set(0);
+    const controls = animate(count, parsed.number, {
+      duration: 1.5,
+      delay: delay + 0.2,
+      ease: [0.25, 0.46, 0.45, 0.94] // easeOutQuad
+    });
+    return () => controls.stop();
+  }, [parsed.number, delay, count]);
+
+  // If value is "N/A" or non-numeric, just return it
+  if (value === "N/A" || parsed.number === 0 && !value.includes("0")) {
+    return <span>{value}</span>;
+  }
+
+  return (
+    <span>
+      {parsed.prefix}
+      <motion.span>{rounded}</motion.span>
+      {parsed.suffix}
+    </span>
+  );
+}
 
 interface MetricCardProps {
   title: string;
@@ -203,7 +266,7 @@ export function MetricCard({
                 className="flex items-baseline gap-2"
               >
                 <span className="text-3xl font-bold tracking-tight bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text">
-                  {value}
+                  <AnimatedValue value={value} delay={delay} />
                 </span>
               </motion.div>
 
@@ -229,6 +292,7 @@ export function MetricCard({
                   <Progress
                     value={progress}
                     className="h-1.5 bg-muted/50"
+                    indicatorClassName={styles.accentColor}
                   />
                 </motion.div>
               )}

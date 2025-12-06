@@ -300,7 +300,7 @@ export function LiquidityChart({
               transition={{ duration: 0.3 }}
               className="h-[280px] w-full min-w-0"
             >
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                 <AreaChart
                   data={filteredData}
                   margin={{ top: 10, right: 10, left: -10, bottom: 0 }}
